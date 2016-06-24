@@ -4,5 +4,9 @@ from .container import ContainerApiMixin
 from .daemon import DaemonApiMixin
 from .exec_api import ExecApiMixin
 from .image import ImageApiMixin
-from .volume import VolumeApiMixin
 from .network import NetworkApiMixin
+from .service import (
+    ServiceApiMixin, TaskConfig, ContainerSpec, Mount, Resources,
+    RestartPolicy
+)
+from .volume import VolumeApiMixin
