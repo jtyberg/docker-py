@@ -22,11 +22,11 @@ class ServiceApiMixin(object):
         data = {
             'Name': name,
             'Labels': labels,
-            'Task': task_config,
+            'TaskTemplate': task_config,
             'Mode': mode,
             'UpdateConfig': update_config,
             'Networks': networks,
-            'Endpoint': endpoint_config
+            'EndpointSpec': endpoint_config
         }
         return self._result(self._post_json(url, data=data), True)
 
@@ -41,6 +41,18 @@ class ServiceApiMixin(object):
         resp = self._delete(url)
         self._raise_for_status(resp)
 
+    @utils.minimum_version('1.24')
+    def tasks(self, filters=None):
+        params = {
+            'filters': utils.convert_filters(filters) if filters else None
+        }
+        url = self._url('/tasks')
+        return self._result(self._get(url, params=params), True)
+
+    @utils.minimum_version('1.24')
+    def inspect_task(self, task):
+        url = self._url('/tasks/{0}', task)
+        return self._result(self._get(url), True)
 
 class TaskConfig(dict):
     def __init__(self, container_spec, resources=None, restart_policy=None,
@@ -96,52 +108,42 @@ class ContainerSpec(dict):
 
 
 class Mount(dict):
-    def __init__(self, target, source=None, vol_name=None, populate=False,
+    def __init__(self, target, source=None, type=None, populate=False,
                  propagation=None, mcs_access_mode=None, writable=True,
-                 volume_template=None):
+                 volume_driver=None):
         self['Target'] = target
         if source is not None:
             self['Source'] = source
-        if vol_name is not None:
-            self['VolumeName'] = vol_name
-        if source and vol_name:
-            raise errors.DockerError(
-                'Only one of source | vol_name can be specified.'
-            )
-        if source:
-            self['Type'] = 'bind'
-        elif vol_name:
-            self['Type'] = 'volume'
-        else:
-            self['Type'] = 'ephemeral'
-
+        self['Type'] = type or 'bind'
         self['Populate'] = populate
+        self['ReadOnly'] = not writable
         if propagation is not None:
             self['Propagation'] = propagation
 
         if mcs_access_mode is not None:
             self['MCSAccessMode'] = mcs_access_mode
 
-        self['Writable'] = writable
-
-        if volume_template is not None:
-            self['VolumeTemplate'] = volume_template
+        if volume_driver is not None:
+            volume_options = {
+                'DriverConfig': {
+                    'Name': volume_driver
+                }
+            }
+            self['VolumeOptions'] = volume_options
 
     @classmethod
     def parse_mount_string(cls, string):
-        parts = string.split(':')
-        if len(parts) > 3:
-            raise errors.DockerError(
-                'Invalid mount format "{0}"'.format(string)
-            )
-        if len(parts) == 1:
-            return cls(target=parts[0])
-        else:
-            target = parts[1]
-            source = parts[0]
-            writable = not (len(parts) == 3 or parts[2] == 'ro')
-            return cls(target, source, writable=writable)
-
+        parts = string.split(',')
+        mount = {}
+        for part in parts:
+            x = part.split('=')
+            k,v = x[0], x[1]
+            mount[k] = v
+        writable = mount['writable'] if 'writable' in mount else 'rw'
+        mount['writable'] = not (writable == 'ro')
+        mount['volume_driver'] = mount.pop('volume-driver', None)
+        target = mount.pop('target')
+        return cls(target, **mount)
 
 class Resources(dict):
     def __init__(self, cpu_limit=None, mem_limit=None, cpu_reservation=None,
